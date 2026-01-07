@@ -13,7 +13,8 @@ def load_db():
             "config": {
                 "pix": "Não configurado",
                 "cargo_owner": None,
-                "cat_suporte": None,
+                "cat_vendas": None,   # Categoria para carrinhos
+                "cat_suporte": None,  # Categoria para suporte/resgate
                 "gif_url": ""
             },
             "produtos": {},
@@ -66,7 +67,7 @@ class ModalResgate(discord.ui.Modal, title="Resgatar Produto"):
         cfg = db["config"]
         
         if not cfg["cat_suporte"]:
-            return await interaction.response.send_message("❌ A categoria de tickets não foi configurada pelo admin!", ephemeral=True)
+            return await interaction.response.send_message("❌ Categoria de suporte não configurada!", ephemeral=True)
 
         if cod in db["cupons"] and not db["cupons"][cod]["usado"]:
             info_produto = db["cupons"][cod]["produto"]
@@ -74,7 +75,7 @@ class ModalResgate(discord.ui.Modal, title="Resgatar Produto"):
             save_db(db)
             
             guild = interaction.guild
-            categoria = guild.get_channel(int(cfg["cat_suporte"]))
+            categoria = guild.get_channel(int(cfg["cat_suporte"])) # USA CATEGORIA DE SUPORTE
             cargo_staff = guild.get_role(int(cfg["cargo_owner"]))
             
             overwrites = {
@@ -83,7 +84,7 @@ class ModalResgate(discord.ui.Modal, title="Resgatar Produto"):
                 cargo_staff: discord.PermissionOverwrite(view_channel=True, send_messages=True)
             }
             
-            canal = await guild.create_text_channel(name=f"entrega-{interaction.user.name}", category=categoria, overwrites=overwrites)
+            canal = await guild.create_text_channel(name=f"resgate-{interaction.user.name}", category=categoria, overwrites=overwrites)
             
             embed = discord.Embed(
                 title="✅ Resgate Validado!",
@@ -93,7 +94,7 @@ class ModalResgate(discord.ui.Modal, title="Resgatar Produto"):
             if cfg["gif_url"]: embed.set_image(url=cfg["gif_url"])
             
             await canal.send(content=f"{interaction.user.mention} | {cargo_staff.mention}", embed=embed, view=TicketActions(interaction.user.id))
-            await interaction.response.send_message(f"✅ Canal criado: {canal.mention}", ephemeral=True)
+            await interaction.response.send_message(f"✅ Canal de resgate criado: {canal.mention}", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Código inválido ou já usado!", ephemeral=True)
 
@@ -106,10 +107,10 @@ class PainelSuporte(discord.ui.View):
     async def suporte(self, interaction: discord.Interaction, button: discord.ui.Button):
         cfg = db["config"]
         if not cfg["cat_suporte"]:
-            return await interaction.response.send_message("❌ A categoria de tickets não foi configurada!", ephemeral=True)
+            return await interaction.response.send_message("❌ Categoria de suporte não configurada!", ephemeral=True)
 
         guild = interaction.guild
-        categoria = guild.get_channel(int(cfg["cat_suporte"]))
+        categoria = guild.get_channel(int(cfg["cat_suporte"])) # USA CATEGORIA DE SUPORTE
         cargo_staff = guild.get_role(int(cfg["cargo_owner"]))
 
         overwrites = {
@@ -173,11 +174,11 @@ class BuyView(discord.ui.View):
     @discord.ui.button(label="Comprar", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
         cfg = db["config"]
-        if not cfg["cat_suporte"]:
-            return await interaction.response.send_message("❌ Categoria não configurada!", ephemeral=True)
+        if not cfg["cat_vendas"]:
+            return await interaction.response.send_message("❌ Categoria de Vendas não configurada!", ephemeral=True)
 
         guild = interaction.guild
-        categoria = guild.get_channel(int(cfg["cat_suporte"]))
+        categoria = guild.get_channel(int(cfg["cat_vendas"])) # USA CATEGORIA DE VENDAS
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
@@ -194,20 +195,28 @@ class BuyView(discord.ui.View):
         await canal.send(content=interaction.user.mention, embed=embed, view=AdminActions(interaction.user.id, self.produto, self.cargo_id))
         await interaction.response.send_message(f"✅ Carrinho criado", view=RedirectView(canal.jump_url), ephemeral=True)
 
-# ================== COMANDOS ==================
+# ================== COMANDOS DE CONFIGURAÇÃO ==================
 
-@bot.tree.command(name="categoria-ticket", description="Define a categoria onde os canais serão criados")
-async def categoria_ticket(interaction: discord.Interaction, categoria: discord.CategoryChannel):
+@bot.tree.command(name="config-vendas", description="Define a categoria onde os carrinhos de COMPRA serão abertos")
+async def config_vendas(interaction: discord.Interaction, categoria: discord.CategoryChannel):
+    db["config"]["cat_vendas"] = categoria.id
+    save_db(db)
+    await interaction.response.send_message(f"✅ Categoria de **VENDAS** definida: {categoria.name}", ephemeral=True)
+
+@bot.tree.command(name="config-suporte", description="Define a categoria onde o SUPORTE e RESGATE serão abertos")
+async def config_suporte(interaction: discord.Interaction, categoria: discord.CategoryChannel):
     db["config"]["cat_suporte"] = categoria.id
     save_db(db)
-    await interaction.response.send_message(f"✅ Categoria definida para: **{categoria.name}**", ephemeral=True)
+    await interaction.response.send_message(f"✅ Categoria de **SUPORTE** definida: {categoria.name}", ephemeral=True)
 
-@bot.tree.command(name="setup", description="Configura PIX e Admin")
+@bot.tree.command(name="setup", description="Configura PIX e Cargo Staff")
 async def setup(interaction: discord.Interaction, pix: str, cargo_admin: discord.Role):
     db["config"]["pix"] = pix
     db["config"]["cargo_owner"] = cargo_admin.id
     save_db(db)
     await interaction.response.send_message("✅ Configurações básicas salvas!", ephemeral=True)
+
+# ================== COMANDOS DE PAINEL E PRODUTO ==================
 
 @bot.tree.command(name="enviar_painel", description="Envia o painel de Suporte/Resgate")
 async def enviar_painel(interaction: discord.Interaction, canal: discord.TextChannel, gif_url: str):
@@ -218,17 +227,7 @@ async def enviar_painel(interaction: discord.Interaction, canal: discord.TextCha
     await canal.send(embed=embed, view=PainelSuporte())
     await interaction.response.send_message("✅ Painel enviado!", ephemeral=True)
 
-@bot.tree.command(name="editar_painel", description="Edita o painel existente")
-async def editar_painel(interaction: discord.Interaction, message_id: str, titulo: str, desc: str, gif_url: str):
-    msg = await interaction.channel.fetch_message(int(message_id))
-    db["config"]["gif_url"] = gif_url
-    save_db(db)
-    embed = discord.Embed(title=titulo, description=desc, color=0x2b2d31)
-    embed.set_image(url=gif_url)
-    await msg.edit(embed=embed, view=PainelSuporte())
-    await interaction.response.send_message("✅ Painel atualizado!", ephemeral=True)
-
-@bot.tree.command(name="produtor", description="Cria um produto")
+@bot.tree.command(name="produtor", description="Cria um produto no banco")
 async def produtor(interaction: discord.Interaction):
     class ProdModal(discord.ui.Modal, title="Criar Produto"):
         nome = discord.ui.TextInput(label="Nome")
